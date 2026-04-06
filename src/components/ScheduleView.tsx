@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toDateString, LEX_START_DATE, LEX_END_DATE } from '@/lib/constants';
@@ -12,53 +12,95 @@ import { motion } from 'framer-motion';
 export default function ScheduleView() {
   const [selectedDate, setSelectedDate] = useState(() => {
     const today = new Date();
-    // Normalize today's date to midnight to avoid time-of-day comparison issues
     today.setHours(0, 0, 0, 0);
     
-    if (today >= LEX_START_DATE && today <= LEX_END_DATE) return today;
-    return LEX_START_DATE;
+    const startDate = new Date(LEX_START_DATE);
+    startDate.setHours(0, 0, 0, 0);
+    
+    const endDate = new Date(LEX_END_DATE);
+    endDate.setHours(0, 0, 0, 0);
+    
+    if (today >= startDate && today <= endDate) {
+      return today;
+    }
+    return startDate;
   });
-  
   const [view, setView] = useState<'timeline' | 'calendar'>('timeline');
 
-  // We use useMemo to ensure dateStr stays consistent
-  const dateStr = useMemo(() => toDateString(selectedDate), [selectedDate]);
+  const dateStr = toDateString(selectedDate);
 
-  const { data: schedules = [], isLoading } = useQuery({
+  const { data: schedules = [], isLoading, refetch } = useQuery({
     queryKey: ['schedules', dateStr],
     queryFn: async () => {
+      console.log('Fetching schedules for date:', dateStr);
+      
       const { data, error } = await supabase
         .from('schedules')
         .select('*')
         .eq('date', dateStr);
-        
-      if (error) throw error;
-
-      // FIX: Robust Chronological Sorting in JavaScript
-      return (data || []).sort((a, b) => {
-        // Helper to convert time strings (like "8:00 AM" or "13:00") to a comparable number
-        const getMinutes = (timeStr: string) => {
-          if (!timeStr) return 0;
-          // If your DB uses "08:00", this works. 
-          // If it uses "8:00 AM", we convert to 24h for comparison
-          const [time, modifier] = timeStr.split(' ');
-          let [hours, minutes] = time.split(':').map(Number);
-          
-          if (modifier === 'PM' && hours < 12) hours += 12;
-          if (modifier === 'AM' && hours === 12) hours = 0;
-          
-          return hours * 60 + minutes;
-        };
-        return getMinutes(a.time_start) - getMinutes(b.time_start);
+      
+      if (error) {
+        console.error('Error fetching schedules:', error);
+        throw error;
+      }
+      
+      console.log('Raw data from Supabase:', data);
+      
+      // Sort by time_start (handle both "08:00" and "8:00 AM" formats)
+      const sorted = [...data].sort((a, b) => {
+        const timeA = convertTo24Hour(a.time_start);
+        const timeB = convertTo24Hour(b.time_start);
+        return timeA.localeCompare(timeB);
       });
+      
+      console.log('Sorted schedules:', sorted);
+      return sorted;
     },
+    enabled: true, // Always fetch when date changes
   });
+
+  // Helper function to convert various time formats to 24-hour for sorting
+  const convertTo24Hour = (timeStr: string) => {
+    // If already in 24-hour format like "08:00"
+    if (timeStr.match(/^\d{2}:\d{2}$/)) {
+      return timeStr;
+    }
+    
+    // Handle "8:00 AM" or "1:00 PM" format
+    const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (match) {
+      let hour = parseInt(match[1]);
+      const minute = match[2];
+      const period = match[3].toUpperCase();
+      
+      if (period === 'PM' && hour !== 12) hour += 12;
+      if (period === 'AM' && hour === 12) hour = 0;
+      
+      return `${hour.toString().padStart(2, '0')}:${minute}`;
+    }
+    
+    return timeStr; // fallback
+  };
+
+  // Force refetch when date changes
+  useEffect(() => {
+    console.log('Date changed to:', dateStr);
+    refetch();
+  }, [dateStr, refetch]);
 
   const navigate = (dir: number) => {
     const d = new Date(selectedDate);
     d.setDate(d.getDate() + dir);
     if (d >= LEX_START_DATE && d <= LEX_END_DATE) setSelectedDate(d);
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center py-12">
+        <div className="w-6 h-6 border-2 border-gray-200 border-t-purple-500 rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -67,7 +109,7 @@ export default function ScheduleView() {
         <button
           onClick={() => setView('timeline')}
           className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold transition-all ${
-            view === 'timeline' ? 'bg-pink-500 text-white shadow-md' : 'bg-gray-100 text-gray-500'
+            view === 'timeline' ? 'gradient-pink text-primary-foreground shadow-md' : 'bg-muted text-muted-foreground'
           }`}
         >
           <List size={14} /> Timeline
@@ -75,7 +117,7 @@ export default function ScheduleView() {
         <button
           onClick={() => setView('calendar')}
           className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold transition-all ${
-            view === 'calendar' ? 'bg-pink-500 text-white shadow-md' : 'bg-gray-100 text-gray-500'
+            view === 'calendar' ? 'gradient-pink text-primary-foreground shadow-md' : 'bg-muted text-muted-foreground'
           }`}
         >
           <CalendarDays size={14} /> Calendar
@@ -86,18 +128,13 @@ export default function ScheduleView() {
         <motion.div key="timeline" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
           <DayHeader date={selectedDate} onPrev={() => navigate(-1)} onNext={() => navigate(1)} />
           <DayPdfButton date={dateStr} />
-          
-          {isLoading ? (
-            <div className="flex justify-center py-12">
-               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-pink-500"></div>
-            </div>
-          ) : schedules.length === 0 ? (
+          {schedules.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-gray-400 text-sm">No activities scheduled for this day ({dateStr})</p>
-              <p className="text-2xl mt-2">🌸</p>
+              <p className="text-muted-foreground text-sm">No activities scheduled for this day</p>
+              <p className="text-2xl mt-2">📅</p>
             </div>
           ) : (
-            <div className="space-y-0 mt-4">
+            <div className="space-y-0">
               {schedules.map((s, i) => (
                 <ScheduleCard key={s.id} schedule={s} index={i} />
               ))}
