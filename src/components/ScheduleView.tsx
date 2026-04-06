@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toDateString, LEX_START_DATE, LEX_END_DATE } from '@/lib/constants';
@@ -12,31 +12,61 @@ import { motion } from 'framer-motion';
 export default function ScheduleView() {
   const [selectedDate, setSelectedDate] = useState(() => {
     const today = new Date();
-    if (today >= LEX_START_DATE && today <= LEX_END_DATE) return today;
-    return LEX_START_DATE;
+    today.setHours(0, 0, 0, 0);
+    
+    const startDate = new Date(LEX_START_DATE);
+    startDate.setHours(0, 0, 0, 0);
+    
+    const endDate = new Date(LEX_END_DATE);
+    endDate.setHours(0, 0, 0, 0);
+    
+    if (today >= startDate && today <= endDate) {
+      return today;
+    }
+    return startDate;
   });
   const [view, setView] = useState<'timeline' | 'calendar'>('timeline');
 
   const dateStr = toDateString(selectedDate);
 
-  const { data: schedules = [] } = useQuery({
+  const { data: schedules = [], refetch } = useQuery({
     queryKey: ['schedules', dateStr],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('schedules')
         .select('*')
         .eq('date', dateStr)
-        .order('time_start');
+        .order('time_start', { ascending: true });
+      
       if (error) throw error;
-      return data;
+      
+      // Ensure proper time sorting (e.g., "08:00" comes before "13:00")
+      return [...data].sort((a, b) => {
+        return a.time_start.localeCompare(b.time_start);
+      });
     },
   });
+
+  // Refetch when date changes
+  useEffect(() => {
+    refetch();
+  }, [dateStr, refetch]);
 
   const navigate = (dir: number) => {
     const d = new Date(selectedDate);
     d.setDate(d.getDate() + dir);
     if (d >= LEX_START_DATE && d <= LEX_END_DATE) setSelectedDate(d);
   };
+
+  // Debug logging
+  useEffect(() => {
+    console.log('Current date:', dateStr);
+    console.log('Schedules count:', schedules.length);
+    if (schedules.length > 0) {
+      console.log('First schedule time:', schedules[0].time_start);
+      console.log('Last schedule time:', schedules[schedules.length - 1].time_start);
+    }
+  }, [dateStr, schedules]);
 
   return (
     <div>
