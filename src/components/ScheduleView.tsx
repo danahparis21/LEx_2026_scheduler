@@ -29,7 +29,7 @@ export default function ScheduleView() {
 
   const dateStr = toDateString(selectedDate);
 
-  const { data: schedules = [], isLoading, error, refetch } = useQuery({
+  const { data: schedules = [], isLoading, refetch } = useQuery({
     queryKey: ['schedules', dateStr],
     queryFn: async () => {
       console.log('Fetching schedules for date:', dateStr);
@@ -46,32 +46,47 @@ export default function ScheduleView() {
       
       console.log('Raw data from Supabase:', data);
       
-      // Sort by time_start
+      // Sort by time_start (handle both "08:00" and "8:00 AM" formats)
       const sorted = [...data].sort((a, b) => {
-        return a.time_start.localeCompare(b.time_start);
+        const timeA = convertTo24Hour(a.time_start);
+        const timeB = convertTo24Hour(b.time_start);
+        return timeA.localeCompare(timeB);
       });
       
       console.log('Sorted schedules:', sorted);
       return sorted;
     },
-    // This ensures data is fetched immediately when component mounts
-    staleTime: 0,
-    gcTime: 0,
+    enabled: true, // Always fetch when date changes
   });
 
-  // Force refetch when date changes and on initial mount
+  // Helper function to convert various time formats to 24-hour for sorting
+  const convertTo24Hour = (timeStr: string) => {
+    // If already in 24-hour format like "08:00"
+    if (timeStr.match(/^\d{2}:\d{2}$/)) {
+      return timeStr;
+    }
+    
+    // Handle "8:00 AM" or "1:00 PM" format
+    const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (match) {
+      let hour = parseInt(match[1]);
+      const minute = match[2];
+      const period = match[3].toUpperCase();
+      
+      if (period === 'PM' && hour !== 12) hour += 12;
+      if (period === 'AM' && hour === 12) hour = 0;
+      
+      return `${hour.toString().padStart(2, '0')}:${minute}`;
+    }
+    
+    return timeStr; // fallback
+  };
+
+  // Force refetch when date changes
   useEffect(() => {
-    console.log('Date changed to or initial mount:', dateStr);
+    console.log('Date changed to:', dateStr);
     refetch();
   }, [dateStr, refetch]);
-
-  // Debug: Log when schedules change
-  useEffect(() => {
-    console.log('Schedules updated:', schedules.length, 'items for', dateStr);
-    if (schedules.length > 0) {
-      console.log('Schedule times:', schedules.map(s => s.time_start));
-    }
-  }, [schedules, dateStr]);
 
   const navigate = (dir: number) => {
     const d = new Date(selectedDate);
@@ -79,21 +94,10 @@ export default function ScheduleView() {
     if (d >= LEX_START_DATE && d <= LEX_END_DATE) setSelectedDate(d);
   };
 
-  // Show loading state
   if (isLoading) {
     return (
       <div className="flex justify-center py-12">
         <div className="w-6 h-6 border-2 border-gray-200 border-t-purple-500 rounded-full animate-spin"></div>
-      </div>
-    );
-  }
-
-  // Show error state
-  if (error) {
-    return (
-      <div className="text-center py-12">
-        <p className="text-red-500 text-sm">Error loading schedules</p>
-        <button onClick={() => refetch()} className="mt-2 text-purple-500 text-sm">Retry</button>
       </div>
     );
   }
@@ -128,12 +132,6 @@ export default function ScheduleView() {
             <div className="text-center py-12">
               <p className="text-muted-foreground text-sm">No activities scheduled for this day</p>
               <p className="text-2xl mt-2">📅</p>
-              <button 
-                onClick={() => refetch()} 
-                className="mt-4 text-xs text-purple-500 underline"
-              >
-                Refresh
-              </button>
             </div>
           ) : (
             <div className="space-y-0">
