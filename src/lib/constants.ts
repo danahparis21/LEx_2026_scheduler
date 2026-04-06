@@ -5,11 +5,18 @@ export const ADMIN_USERNAME = 'lexusername';
 export const ADMIN_PASSWORD = 'lexpassword';
 
 export function getDayNumber(date: Date): number {
-  const start = new Date(LEX_START_DATE);
-  start.setHours(0, 0, 0, 0);
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  const diff = Math.floor((d.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+  // Use local date components to avoid timezone issues
+  const startYear = LEX_START_DATE.getFullYear();
+  const startMonth = LEX_START_DATE.getMonth();
+  const startDay = LEX_START_DATE.getDate();
+  const startLocal = new Date(startYear, startMonth, startDay);
+  
+  const dYear = date.getFullYear();
+  const dMonth = date.getMonth();
+  const dDay = date.getDate();
+  const dLocal = new Date(dYear, dMonth, dDay);
+  
+  const diff = Math.floor((dLocal.getTime() - startLocal.getTime()) / (1000 * 60 * 60 * 24));
   return diff + 1;
 }
 
@@ -22,7 +29,11 @@ export function formatDate(date: Date): string {
 }
 
 export function toDateString(date: Date): string {
-  return date.toISOString().split('T')[0];
+  // Timezone-safe date formatting
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 export const AVATAR_COLORS = [
